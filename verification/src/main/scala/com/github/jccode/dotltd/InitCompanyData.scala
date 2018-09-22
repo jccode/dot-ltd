@@ -1,13 +1,12 @@
 package com.github.jccode.dotltd
 
-import akka.Done
 import akka.actor.ActorSystem
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.model.HttpRequest
 import akka.stream.ActorMaterializer
 import akka.stream.alpakka.slick.javadsl.SlickSession
 import akka.stream.alpakka.slick.scaladsl.Slick
-import akka.stream.scaladsl.{Flow, Sink}
+import akka.stream.scaladsl.{Flow, Keep, Sink}
 import com.github.jccode.dotltd.dao.Tables.{Stock, stocks}
 import play.api.libs.json.Json
 import spray.json.RootJsonFormat
@@ -15,56 +14,47 @@ import spray.json.RootJsonFormat
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
 import scala.io.Source
-import scala.util.Success
 
 
 case class CompanyItem(name: String, fullName: Option[String] = None, stockCode: Option[String] = None, engName: Option[String] = None, website: Option[String] = None)
 
 object InitCompanyData extends App {
 
-  /*
+  val runner = new CompanyDataFlowRunner()
+  runner.startFlow()
+
+//  CompanyResolverImplTest.akkaHttpResolverTest()
+
+}
+
+class CompanyDataFlowRunner {
+
   implicit val actorSystem = ActorSystem()
   implicit val materialize = ActorMaterializer()
-  implicit val ec = actorSystem.dispatcher
-
-  val runner = CompanyDataFlowRunner()
-  runner.startFlow().onComplete { _ =>
-    actorSystem.terminate()
-  }
-  */
-
-  CompanyResolverImplTest.blockResolverTest()
-}
-
-class CompanyDataFlowRunner(implicit val actorSystem: ActorSystem, implicit val materialize: ActorMaterializer) { this: CompanyResolver =>
-
   import actorSystem.dispatcher
   implicit val session = SlickSession.forConfig("dotltd")
+  val resolver = new CompanyResolverImpl
 
   import session.profile.api._
-  val source = Slick.source(stocks.take(10).result)
+  val source = Slick.source(stocks.take(500).drop(400).result)
 
   val flow = Flow[Stock]
-    .map(stock => resolveCompany(stock.code))
+    .mapAsync(5)(stock => resolver.resolveCompany(stock.code))
 
-  val sink = Sink.foreach[Future[Option[CompanyItem]]](println)
+  val sink = Sink.foreach[Option[CompanyItem]] {
+    case Some(item) => println(item)
+    case None => println("No company")
+  }
 
-//  source.via(flow).runWith(sink).onComplete { _ =>
-//    session.close()
-//    actorSystem.terminate()
-//  }
 
-  def startFlow(): Future[Done] = {
-    val f = source.via(flow).runWith(sink)
-    f.onComplete(_ => session.close())
-    f
+  def startFlow(): Unit = {
+    source.via(flow).runWith(sink).onComplete { _ =>
+      session.close()
+      actorSystem.terminate()
+    }
   }
 }
 
-object CompanyDataFlowRunner {
-//  def apply()(implicit actorSystem: ActorSystem, materialize: ActorMaterializer) =
-//    new CompanyDataFlowRunner
-}
 
 trait CompanyResolver {
   def resolveCompany(stockCode: String): Future[Option[CompanyItem]]
@@ -114,9 +104,7 @@ class CompanyResolverImpl(implicit val actorSystem: ActorSystem, implicit val ma
   override def resolveCompany(stockCode: String): Future[Option[CompanyItem]] = {
     import CompanyResolverImpl.JsonProtocol._
     import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
-
     Http().singleRequest(HttpRequest(uri = url(stockCode))).flatMap { res =>
-      println(res)
       res.status match {
         case OK => {
           /*
@@ -159,7 +147,7 @@ object CompanyResolverImplTest {
   def blockResolverTest(): Unit =  {
     import scala.concurrent.ExecutionContext.Implicits.global
     val resolver = new CompanResolverBlockImpl
-    val f = resolver.resolveCompany("300059")
+    val f = resolver.resolveCompany("300059") // 501030, 300059
     println(Await.result(f, 5 seconds))
   }
 
