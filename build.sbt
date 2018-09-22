@@ -1,6 +1,7 @@
 
 val slickVersion = "3.2.1"
 val akkaVersion = "2.5.4"
+val playVersion = "2.6.10"
 
 lazy val shareSettings = Seq(
   organization := "com.github.jccode",
@@ -39,6 +40,12 @@ lazy val verification = (project in file("verification"))
       "com.typesafe.akka" %% "akka-stream" % akkaVersion,
       "com.typesafe.akka" %% "akka-stream-testkit" % akkaVersion % Test,
       "com.lightbend.akka" %% "akka-stream-alpakka-slick" % "0.20",
+
+      "com.typesafe.akka" %% "akka-http" % "10.0.9",
+      "com.typesafe.akka" %% "akka-http-testkit" % "10.0.9" % Test,
+      "com.typesafe.akka" %% "akka-http-spray-json" % "10.1.5",
+
+      "com.typesafe.play" %% "play-json" % playVersion
     )
   )
   .settings(
