@@ -58,19 +58,10 @@ class CompanyDataFlowRunner extends LazyLogging {
 
   val logSink = Sink.foreach[CompanyItem](x => logger.info(x.toString))
 
-  val dbFlow = Slick.flow[CompanyItem] { c: CompanyItem =>
+  val dbSink = Slick.sink[CompanyItem] { c: CompanyItem =>
     val now = new Timestamp(System.currentTimeMillis())
     companys += Company(0, c.name, c.fullName, c.stockCode, c.engName, c.website, now, now)
   }
-
-  val flow2 = Flow[Stock]
-    .map(stock => resolver.resolveCompany(stock.code).map(_.map(_.copy(name = stock.name.get))))
-    .filter(_.value.isDefined)
-    .map(f => f.map(_.get))
-
-//  val dbFlow2 = Slick.flow[Future[CompanyItem]] { f: Future[CompanyItem] =>
-//    f.map { c => companys += Company(0, c.name, c.fullName, c.stockCode, c.engName, c.website, null, null) }
-//  }
 
   def shutdown(): Unit = {
     session.close()
@@ -82,7 +73,7 @@ class CompanyDataFlowRunner extends LazyLogging {
   }
 
   def startFlow(): Unit = {
-    source.via(flow).via(dbFlow).runWith(Sink.ignore).onComplete(_ => shutdown())
+    source.via(flow).runWith(dbSink).onComplete(_ => shutdown())
   }
 
 }
