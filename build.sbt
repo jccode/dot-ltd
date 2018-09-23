@@ -1,5 +1,5 @@
 
-val slickVersion = "3.2.1"
+val slickVersion = "3.2.2"
 val akkaVersion = "2.5.4"
 val playVersion = "2.6.10"
 

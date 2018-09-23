@@ -1,5 +1,7 @@
 package com.github.jccode.dotltd
 
+import java.sql.Timestamp
+
 import akka.actor.ActorSystem
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.model.HttpRequest
@@ -7,7 +9,7 @@ import akka.stream.ActorMaterializer
 import akka.stream.alpakka.slick.javadsl.SlickSession
 import akka.stream.alpakka.slick.scaladsl.Slick
 import akka.stream.scaladsl.{Flow, Keep, Sink}
-import com.github.jccode.dotltd.dao.Tables.{Stock, stocks}
+import com.github.jccode.dotltd.dao.Tables.{Company, Stock, companys, stocks}
 import com.typesafe.scalalogging.LazyLogging
 import play.api.libs.json.Json
 import spray.json.RootJsonFormat
@@ -44,27 +46,45 @@ class CompanyDataFlowRunner extends LazyLogging {
   implicit val materialize = ActorMaterializer()
   import actorSystem.dispatcher
   implicit val session = SlickSession.forConfig("dotltd")
+
   val resolver = new CompanyResolverImpl
 
   import session.profile.api._
-//  val source = Slick.source(stocks.filter(x => x.code.startsWith("2") || x.code.startsWith("6")).take(200).result)
-  val source = Slick.source(stocks.result)
+  val source = Slick.source(stocks.take(10).result)
 
   val flow = Flow[Stock]
     .mapAsync(5)(stock => resolver.resolveCompany(stock.code).map(_.map(_.copy(name = stock.name.get))))
+    .collect { case Some(item) => item }
 
-  val sink = Sink.foreach[Option[CompanyItem]] {
-    case Some(item) => logger.info(item.toString)
-    case None => logger.info("No company")
+  val logSink = Sink.foreach[CompanyItem](x => logger.info(x.toString))
+
+  val dbFlow = Slick.flow[CompanyItem] { c: CompanyItem =>
+    val now = new Timestamp(System.currentTimeMillis())
+    companys += Company(0, c.name, c.fullName, c.stockCode, c.engName, c.website, now, now)
   }
 
+  val flow2 = Flow[Stock]
+    .map(stock => resolver.resolveCompany(stock.code).map(_.map(_.copy(name = stock.name.get))))
+    .filter(_.value.isDefined)
+    .map(f => f.map(_.get))
+
+//  val dbFlow2 = Slick.flow[Future[CompanyItem]] { f: Future[CompanyItem] =>
+//    f.map { c => companys += Company(0, c.name, c.fullName, c.stockCode, c.engName, c.website, null, null) }
+//  }
+
+  def shutdown(): Unit = {
+    session.close()
+    actorSystem.terminate()
+  }
+
+  def startFlowPrint(): Unit = {
+    source.via(flow).runWith(logSink).onComplete { _ => shutdown()}
+  }
 
   def startFlow(): Unit = {
-    source.via(flow).runWith(sink).onComplete { _ =>
-      session.close()
-      actorSystem.terminate()
-    }
+    source.via(flow).via(dbFlow).runWith(Sink.ignore).onComplete(_ => shutdown())
   }
+
 }
 
 
@@ -99,7 +119,7 @@ class CompanResolverBlockImpl(implicit ec: ExecutionContext) extends EastMoneyRe
   override def resolveCompany(stockCode: String): Future[Option[CompanyItem]] = {
     val json = Json.parse(Source.fromURL(url(stockCode)).mkString)
     // println(json)
-     println(json \ "Result" \ "jbzl")
+    // println(json \ "Result" \ "jbzl")
     val info = json \ "Result" \ "jbzl"
     if (info.isDefined) {
       Future {
