@@ -2,6 +2,7 @@ package com.github.jccode.dotltd
 
 import java.sql.Timestamp
 
+import akka.Done
 import akka.actor.ActorSystem
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.model.HttpRequest
@@ -29,15 +30,10 @@ object InitCompanyData extends App {
   def resolveTest(): Unit = {
     import CompanyResolverImplTest._
     def resolve = akkaHttpResolverTest _
-    resolve("201000")
-    resolve("500007")
-    resolve("600066")
-    resolve("000070")
-    resolve("150209")
-    resolve("200613")
-    resolve("300003")
+    resolve("512680")
   }
 
+  // resolveTest()
 }
 
 class CompanyDataFlowRunner extends LazyLogging {
@@ -50,7 +46,7 @@ class CompanyDataFlowRunner extends LazyLogging {
   val resolver = new CompanyResolverImpl
 
   import session.profile.api._
-  val source = Slick.source(stocks.take(10).result)
+  val source = Slick.source(stocks.result)
 
   val flow = Flow[Stock]
     .mapAsync(5)(stock => resolver.resolveCompany(stock.code).map(_.map(_.copy(name = stock.name.get))))
@@ -59,8 +55,15 @@ class CompanyDataFlowRunner extends LazyLogging {
   val logSink = Sink.foreach[CompanyItem](x => logger.info(x.toString))
 
   val dbSink = Slick.sink[CompanyItem] { c: CompanyItem =>
-    val now = new Timestamp(System.currentTimeMillis())
-    companys += Company(0, c.name, c.fullName, c.stockCode, c.engName, c.website, now, now)
+    println(s"Saving $c")
+    companys.filter(_.name === c.name).exists.result.flatMap { exist =>
+      if (!exist) {
+        val now = new Timestamp(System.currentTimeMillis())
+        companys += Company(0, c.name, c.fullName, c.stockCode, c.engName, c.website, now, now)
+      } else {
+        DBIO.successful(0)
+      }
+    }
   }
 
   def shutdown(): Unit = {
@@ -69,7 +72,8 @@ class CompanyDataFlowRunner extends LazyLogging {
   }
 
   def startFlowPrint(): Unit = {
-    source.via(flow).runWith(logSink).onComplete { _ => shutdown()}
+    val f: Future[Done] = source.via(flow).toMat(logSink)(Keep.right).run()
+    f.onComplete { _ => shutdown()}
   }
 
   def startFlow(): Unit = {

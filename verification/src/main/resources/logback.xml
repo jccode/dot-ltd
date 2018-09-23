@@ -20,8 +20,12 @@
             </timeBasedFileNamingAndTriggeringPolicy>
         </rollingPolicy>
     </appender>
-    <root level="DEBUG">
+
+    <root level="info">
         <appender-ref ref="FILE" />
         <appender-ref ref="STDOUT"/>
     </root>
+
+    <logger name="slick" level="debug"/>
+
 </configuration>
